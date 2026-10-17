@@ -8,6 +8,7 @@ Open the GitHub Pages link in the Quest browser, press **Enter AR**, and allow i
 
 - **Trigger**: place a candle where you point
 - **Grip**: summon the ghost
+- **A**: clear all candles
 - **B**: show the room scan as a wireframe
 
 `lib/` holds a copy of three.js (0.170) so the page has no outside dependencies.

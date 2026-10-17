@@ -141,6 +141,11 @@ function makeCandle() {
   return g;
 }
 
+function clearCandles() {
+  for (const c of candles) { props.remove(c); c.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
+  candles.length = 0;
+}
+
 function makeCobweb(size, mirrored) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size),
             new THREE.MeshBasicMaterial({ map: TEX.web, transparent: true, side: THREE.DoubleSide,
@@ -341,6 +346,7 @@ function pollButtons(session) {
     gp.buttons.forEach((b, idx) => {
       if (b.pressed && !was[idx]) {
         if (idx === 5) { showScan = !showScan; occluders.traverse(o => { if (o.isMesh) o.material = showScan ? debugMat : occMat; }); }
+        if (idx === 4) clearCandles();
       }
       was[idx] = b.pressed;
     });
@@ -357,7 +363,7 @@ const sessionInit = {
 let inAR = false;
 renderer.xr.addEventListener('sessionstart', () => {
   inAR = true; intro.hidden = true; hud.hidden = false; nextAutoGhost = 40;
-  hud.innerHTML = '<b>Trigger</b> place a candle &nbsp;·&nbsp; <b>Grip</b> summon the ghost &nbsp;·&nbsp; <b>B</b> show room scan';
+  hud.innerHTML = '<b>Trigger</b> place a candle &nbsp;·&nbsp; <b>Grip</b> summon the ghost &nbsp;·&nbsp; <b>A</b> clear candles &nbsp;·&nbsp; <b>B</b> show room scan';
 });
 renderer.xr.addEventListener('sessionend', () => {
   inAR = false; intro.hidden = false; hud.hidden = true; hitTestSource = null; hitTestRequested = false; reticle.visible = false;
@@ -419,7 +425,7 @@ renderer.setAnimationLoop((time, frame) => {
     nextAutoGhost -= dt;
     if (nextAutoGhost <= 0 && ghost.userData.state === 'hidden') { spawnGhost(viewerPos, viewerDir); nextAutoGhost = 60 + Math.random() * 60; }
     if ((time | 0) % 1000 < 20) {
-      hud.innerHTML = '<b>Trigger</b> candle &nbsp;·&nbsp; <b>Grip</b> ghost &nbsp;·&nbsp; <b>B</b> show scan' +
+      hud.innerHTML = '<b>Trigger</b> candle &nbsp;·&nbsp; <b>Grip</b> ghost &nbsp;·&nbsp; <b>A</b> clear candles &nbsp;·&nbsp; <b>B</b> show scan' +
         `<br><span style="color:#8d8578">room: ${stats.meshes} mesh, ${stats.planes} planes · candles ${candles.length} · webs ${cobwebs.length}</span>`;
     }
   }
