@@ -58,9 +58,15 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// ---------- lights (the stone walls are lit by the candles and the moon) ----------
+scene.add(new THREE.AmbientLight(0x4a4660, 0.9));
+const moonLight = new THREE.DirectionalLight(0x9db4ff, 1.2);
+moonLight.position.set(0, 4, 3); scene.add(moonLight); scene.add(moonLight.target);
+const MAX_CANDLE_LIGHTS = 6;
+
 // ---------- textures drawn in code (no image files needed) ----------
-function makeCanvas(size) {
-  const c = document.createElement('canvas'); c.width = c.height = size; return c;
+function makeCanvas(w, h = w) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h; return c;
 }
 function glowTexture(inner, outer) {
   const c = makeCanvas(128); const g = c.getContext('2d');
@@ -99,7 +105,6 @@ function cobwebTexture() {
     }
     g.stroke();
   }
-  // a few loose strands
   g.strokeStyle = 'rgba(235,235,245,0.5)';
   for (let i = 0; i < 5; i++) {
     const a = (Math.PI / 2) * Math.random();
@@ -111,11 +116,85 @@ function cobwebTexture() {
   }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
+function stoneTexture() {
+  // castle stone blocks in a running bond; one texture tile covers 1 m x 1 m of wall
+  const S = 512; const c = makeCanvas(S); const g = c.getContext('2d');
+  g.fillStyle = '#2a2622'; g.fillRect(0, 0, S, S);                     // mortar
+  const rows = 8, rowH = S / rows, blockW = S / 4;
+  for (let r = 0; r < rows; r++) {
+    const off = (r % 2) * blockW / 2;
+    for (let i = -1; i < 5; i++) {
+      const x = i * blockW + off, y = r * rowH;
+      const shade = 70 + Math.random() * 40;
+      const tint = Math.random() * 10;
+      g.fillStyle = `rgb(${shade + tint},${shade - 4},${shade - 12})`;
+      const inset = 3;
+      g.beginPath();
+      g.roundRect(x + inset, y + inset, blockW - inset * 2, rowH - inset * 2, 6); g.fill();
+      // light edge top-left, dark edge bottom-right gives the blocks some depth
+      g.strokeStyle = 'rgba(255,255,255,0.10)'; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(x + inset, y + rowH - inset); g.lineTo(x + inset, y + inset); g.lineTo(x + blockW - inset, y + inset); g.stroke();
+      g.strokeStyle = 'rgba(0,0,0,0.35)';
+      g.beginPath(); g.moveTo(x + inset, y + rowH - inset); g.lineTo(x + blockW - inset, y + rowH - inset); g.lineTo(x + blockW - inset, y + inset); g.stroke();
+      // speckle
+      for (let k = 0; k < 25; k++) {
+        g.fillStyle = `rgba(0,0,0,${Math.random() * 0.25})`;
+        g.fillRect(x + inset + Math.random() * (blockW - inset * 2), y + inset + Math.random() * (rowH - inset * 2), 2, 2);
+      }
+    }
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+}
+function skyTexture() {
+  // night sky with a full moon and distant hills; 1024 px = 4 m of "view" through the window
+  const W = 1024, H = 1024; const c = makeCanvas(W, H); const g = c.getContext('2d');
+  const grd = g.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, '#05070f'); grd.addColorStop(0.6, '#0b1130'); grd.addColorStop(1, '#141a3a');
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 420; i++) {
+    const x = Math.random() * W, y = Math.random() * H * 0.8, r = Math.random() * 1.4 + 0.3;
+    g.fillStyle = `rgba(255,255,${220 + Math.random() * 35 | 0},${0.4 + Math.random() * 0.6})`;
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  // moon with halo
+  const mx = W * 0.5, my = H * 0.3, mr = 95;
+  const halo = g.createRadialGradient(mx, my, mr, mx, my, mr * 3.2);
+  halo.addColorStop(0, 'rgba(200,210,255,0.35)'); halo.addColorStop(1, 'rgba(200,210,255,0)');
+  g.fillStyle = halo; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#f4f1dc'; g.beginPath(); g.arc(mx, my, mr, 0, Math.PI * 2); g.fill();
+  const craters = [[-30, -20, 18], [25, 10, 24], [-5, 40, 12], [40, -40, 10], [-45, 30, 9], [10, -55, 7]];
+  for (const [dx, dy, r] of craters) {
+    g.fillStyle = 'rgba(150,150,130,0.35)'; g.beginPath(); g.arc(mx + dx, my + dy, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(255,255,245,0.25)'; g.beginPath(); g.arc(mx + dx - r * 0.25, my + dy - r * 0.25, r * 0.6, 0, Math.PI * 2); g.fill();
+  }
+  // a thin cloud across the moon
+  g.fillStyle = 'rgba(40,45,70,0.55)';
+  g.beginPath(); g.ellipse(mx + 40, my + 30, 190, 16, 0.05, 0, Math.PI * 2); g.fill();
+  // distant hills and a few dead trees
+  g.fillStyle = '#060811';
+  g.beginPath(); g.moveTo(0, H * 0.78);
+  for (let x = 0; x <= W; x += 32) g.lineTo(x, H * 0.78 - Math.sin(x / 140) * 40 - Math.sin(x / 57) * 18);
+  g.lineTo(W, H); g.lineTo(0, H); g.fill();
+  g.strokeStyle = '#060811'; g.lineWidth = 4; g.lineCap = 'round';
+  for (const tx of [120, 380, 700, 900]) {
+    const base = H * 0.78 - Math.sin(tx / 140) * 40 - Math.sin(tx / 57) * 18;
+    g.beginPath(); g.moveTo(tx, base); g.lineTo(tx + 6, base - 90); g.stroke();
+    for (const [a, l] of [[-0.9, 40], [0.6, 45], [-0.4, 30], [1.1, 25]]) {
+      g.lineWidth = 2.5; g.beginPath(); g.moveTo(tx + 4, base - 60); g.lineTo(tx + 4 + Math.sin(a) * l, base - 60 - Math.cos(a) * l); g.stroke();
+    }
+    g.lineWidth = 4;
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; return t;
+}
 const TEX = { flame: flameTexture(), glow: glowTexture('rgba(255,170,60,0.9)', 'rgba(255,110,30,0.35)'),
-              ghostGlow: glowTexture('rgba(170,230,255,0.6)', 'rgba(120,180,255,0.2)'), web: cobwebTexture() };
+              ghostGlow: glowTexture('rgba(170,230,255,0.6)', 'rgba(120,180,255,0.2)'), web: cobwebTexture(),
+              stone: stoneTexture(), sky: skyTexture() };
 
 // ---------- props ----------
 const props = new THREE.Group(); scene.add(props);
+const castle = new THREE.Group(); scene.add(castle);
 const candles = []; const cobwebs = [];
 
 function makeCandle() {
@@ -136,7 +215,11 @@ function makeCandle() {
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.glow, transparent: true,
                blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.6 }));
   glow.position.y = h + 0.03; glow.scale.set(0.22, 0.22, 1); g.add(glow);
-  g.userData = { flame, glow, h, seed: Math.random() * 100 };
+  let light = null;
+  if (candles.length < MAX_CANDLE_LIGHTS) {
+    light = new THREE.PointLight(0xffa040, 1.2, 5, 2); light.position.y = h + 0.05; g.add(light);
+  }
+  g.userData = { flame, glow, light, h, seed: Math.random() * 100 };
   candles.push(g); props.add(g);
   return g;
 }
@@ -155,6 +238,156 @@ function makeCobweb(size, mirrored) {
   if (mirrored) m.scale.x = -1;
   cobwebs.push(m); props.add(m);
   return m;
+}
+
+// ---------- castle walls and the moon window ----------
+const stoneMat = new THREE.MeshLambertMaterial({ map: TEX.stone });
+const walls = [];            // { c, n, along, pts2, width, height, bottom, mesh }
+let windowWall = null; let windowGroup = null; let skyMesh = null;
+let castleOn = true;
+
+// turn a wall's world polygon into a flat frame: origin at the wall centre, x along the wall, y up, z into the room
+function wallFrame(pts, c, n) {
+  const up = new THREE.Vector3(0, 1, 0);
+  const along = new THREE.Vector3().crossVectors(up, n).normalize();   // x axis, so that x-y-z is right handed with z = n
+  const pts2 = pts.map(p => { const d = p.clone().sub(c); return new THREE.Vector2(d.dot(along), d.dot(up)); });
+  const xs = pts2.map(p => p.x), ys = pts2.map(p => p.y);
+  return { c, n, along, pts2, width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys),
+           bottom: Math.min(...ys), top: Math.max(...ys), mesh: null };
+}
+function frameMatrix(w, zOffset) {
+  return new THREE.Matrix4().makeBasis(w.along, new THREE.Vector3(0, 1, 0), w.n).setPosition(w.c.clone().addScaledVector(w.n, zOffset));
+}
+function archPath(cx, sill, width, height) {
+  const r = width / 2, yArc = sill + height - r;
+  const p = new THREE.Path();
+  p.moveTo(cx - r, sill); p.lineTo(cx + r, sill); p.lineTo(cx + r, yArc);
+  p.absarc(cx, yArc, r, 0, Math.PI, false); p.lineTo(cx - r, sill);
+  return p;
+}
+function buildWallMesh(w, hole) {
+  if (w.mesh) { castle.remove(w.mesh); w.mesh.geometry.dispose(); }
+  const shape = new THREE.Shape(w.pts2);
+  if (hole) shape.holes.push(hole);
+  const geo = new THREE.ShapeGeometry(shape);
+  // ShapeGeometry's uvs are the shape coordinates in metres; the stone tile is 1 m, so repeat 1:1
+  const mesh = new THREE.Mesh(geo, stoneMat);
+  mesh.matrixAutoUpdate = false; mesh.matrix.copy(frameMatrix(w, 0.03));
+  mesh.visible = castleOn;
+  castle.add(mesh); w.mesh = mesh;
+}
+function addWall(pts, c, n) {
+  const w = wallFrame(pts, c, n);
+  if (w.width < 0.5 || w.height < 0.5) return null;
+  buildWallMesh(w, null);
+  walls.push(w);
+  return w;
+}
+function buildWindow(w) {
+  if (windowGroup) { castle.remove(windowGroup); windowGroup = null; }
+  const width = Math.min(1.1, w.width * 0.45);
+  const height = Math.min(1.8, w.height * 0.7);
+  const sill = w.bottom + Math.max(0.6, (w.height - height) * 0.45);
+  const cx = 0;
+  buildWallMesh(w, archPath(cx, sill, width, height));
+
+  const g = new THREE.Group(); g.matrixAutoUpdate = false;
+  // the night outside, drawn on a flat arch just behind the wall surface; it slides a little as you move (parallax)
+  const archShape = new THREE.Shape(); archShape.curves = archPath(cx, sill, width, height).curves;
+  const skyGeo = new THREE.ShapeGeometry(archShape);
+  const uv = skyGeo.attributes.uv, pos = skyGeo.attributes.position;
+  for (let i = 0; i < uv.count; i++) {
+    // map 4 m of sky onto the texture, moon sitting in the upper part of the arch
+    uv.setXY(i, 0.5 + (pos.getX(i) - cx) / 4, 0.62 + (pos.getY(i) - (sill + height * 0.6)) / 4);
+  }
+  const skyMat = new THREE.MeshBasicMaterial({ map: TEX.sky.clone() });
+  skyMat.map.needsUpdate = true;
+  skyMesh = new THREE.Mesh(skyGeo, skyMat); skyMesh.position.z = 0.01; g.add(skyMesh);
+  // a ring of lighter stone around the opening
+  const ring = new THREE.Shape(); ring.curves = archPath(cx, sill - 0.08, width + 0.24, height + 0.2).curves;
+  ring.holes.push(archPath(cx, sill, width, height));
+  const ringMesh = new THREE.Mesh(new THREE.ExtrudeGeometry(ring, { depth: 0.06, bevelEnabled: false }),
+                                  new THREE.MeshLambertMaterial({ color: 0x8a8378 }));
+  ringMesh.position.z = 0.03; g.add(ringMesh);
+  // iron bars
+  const barMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1c });
+  for (const bx of [-width / 3, 0, width / 3]) {
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, height, 8), barMat);
+    bar.position.set(cx + bx, sill + height / 2 - (Math.abs(bx) > 0.01 ? width * 0.08 : 0), 0.05); g.add(bar);
+  }
+  const cross = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, width, 8), barMat);
+  cross.rotation.z = Math.PI / 2; cross.position.set(cx, sill + height * 0.45, 0.05); g.add(cross);
+  // a stone sill to rest a candle on
+  const sillMesh = new THREE.Mesh(new THREE.BoxGeometry(width + 0.3, 0.06, 0.16), new THREE.MeshLambertMaterial({ color: 0x7d766b }));
+  sillMesh.position.set(cx, sill - 0.03, 0.08); g.add(sillMesh);
+  const candle = makeCandle(); candle.position.set(cx + width * 0.3, sill, 0.1); g.add(candle); props.remove(candle);
+
+  g.matrix.copy(frameMatrix(w, 0));
+  g.visible = castleOn;
+  castle.add(g); windowGroup = g; windowWall = w;
+  // moonlight comes in through the window
+  const wc = w.c.clone().addScaledVector(w.n, -2).add(new THREE.Vector3(0, 2, 0));
+  moonLight.position.copy(wc); moonLight.target.position.copy(w.c.clone().addScaledVector(w.n, 2));
+}
+function chooseWindowWall(next) {
+  if (!walls.length) return;
+  const sorted = [...walls].sort((a, b) => b.width * b.height - a.width * a.height);
+  let pick = sorted[0];
+  if (next && windowWall) {
+    const i = sorted.indexOf(windowWall); pick = sorted[(i + 1) % sorted.length];
+    if (windowWall.mesh) buildWallMesh(windowWall, null);  // close up the old window
+  }
+  if (pick === windowWall && !next) return;
+  buildWindow(pick);
+}
+function updateSkyParallax() {
+  if (!skyMesh || !windowWall) return;
+  const d = viewerPos.clone().sub(windowWall.c);
+  skyMesh.material.map.offset.set(-d.dot(windowWall.along) * 0.03, -(d.y - 1.5) * 0.03);
+}
+function setCastleVisible(v) { castleOn = v; castle.traverse(o => { if (o !== castle) o.visible = v; }); }
+
+// ---------- bats ----------
+const bats = []; const batGroup = new THREE.Group(); scene.add(batGroup);
+let ceilingY = 2.4; const roomCenter = new THREE.Vector3(0, 0, -1.5); let roomCenterCount = 0;
+function makeBat() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: 0x120f16, side: THREE.DoubleSide });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), mat); body.scale.set(1, 0.8, 1.6); g.add(body);
+  const wingShape = new THREE.Shape();
+  wingShape.moveTo(0, 0); wingShape.lineTo(0.09, 0.05); wingShape.lineTo(0.17, 0.02); wingShape.lineTo(0.2, -0.03);
+  wingShape.lineTo(0.14, -0.04); wingShape.lineTo(0.09, -0.07); wingShape.lineTo(0.04, -0.05); wingShape.lineTo(0, -0.02);
+  const wingGeo = new THREE.ShapeGeometry(wingShape); wingGeo.rotateX(-Math.PI / 2);
+  const wl = new THREE.Mesh(wingGeo, mat); const wr = new THREE.Mesh(wingGeo, mat); wr.scale.x = -1;
+  g.add(wl); g.add(wr);
+  for (const s of [-1, 1]) { const ear = new THREE.Mesh(new THREE.ConeGeometry(0.008, 0.02, 4), mat); ear.position.set(s * 0.012, 0.028, 0.02); g.add(ear); }
+  g.userData = { wl, wr, phase: Math.random() * Math.PI * 2, speed: 0.6 + Math.random() * 0.5, r: 0.8 + Math.random() * 1.4,
+                 flap: 14 + Math.random() * 8, swoop: 0, swoopAt: 20 + Math.random() * 40 };
+  bats.push(g); batGroup.add(g);
+  return g;
+}
+for (let i = 0; i < 7; i++) makeBat();
+const _bp = new THREE.Vector3(), _bt = new THREE.Vector3();
+function updateBats(t, dt) {
+  for (const b of bats) {
+    const u = b.userData;
+    const a = t * u.speed + u.phase;
+    _bp.set(roomCenter.x + Math.cos(a) * u.r, ceilingY - 0.45 + Math.sin(a * 2.3) * 0.18, roomCenter.z + Math.sin(a) * u.r * 0.8);
+    u.swoopAt -= dt;
+    if (u.swoopAt <= 0) { u.swoop = 1; u.swoopAt = 25 + Math.random() * 40; }
+    if (u.swoop > 0) {
+      // dive at the viewer's head and pull up again
+      const k = 1 - u.swoop; const dip = Math.sin(k * Math.PI);
+      _bt.copy(viewerPos).add(viewerDir.clone().multiplyScalar(0.4)); _bt.y += 0.15;
+      _bp.lerp(_bt, dip * 0.9);
+      u.swoop -= dt / 2.2; if (u.swoop <= 0) u.swoop = 0;
+    }
+    _bt.copy(_bp).sub(b.position);
+    if (_bt.lengthSq() > 1e-6) { b.lookAt(_bp.x + _bt.x, _bp.y + _bt.y, _bp.z + _bt.z); }
+    b.position.copy(_bp);
+    const f = Math.sin(t * u.flap + u.phase) * 0.9;
+    u.wl.rotation.z = f; u.wr.rotation.z = -f;
+  }
 }
 
 // ---------- ghost ----------
@@ -281,7 +514,7 @@ function updateRoomScan(frame, refSpace) {
   stats.planes = planeMap.size;
 }
 
-// put props on the room automatically: candles on tables and desks, cobwebs in the top corners of walls
+// put props on the room automatically: candles on tables and desks, stone and cobwebs on walls
 const FURNITURE = new Set(['table', 'desk', 'nightstand', 'shelf', 'dresser', 'counter', 'cabinet', 'other']);
 const _v = new THREE.Vector3(), _n = new THREE.Vector3(), _c = new THREE.Vector3();
 function decoratePlane(plane, matrix) {
@@ -291,6 +524,7 @@ function decoratePlane(plane, matrix) {
   _n.set(0, 1, 0).transformDirection(matrix);        // plane normal in world space
   _c.set(0, 0, 0); for (const p of pts) _c.add(p); _c.divideScalar(pts.length);
 
+  if (label === 'ceiling') ceilingY = _c.y;
   if (plane.orientation === 'horizontal' && FURNITURE.has(label) && _c.y > 0.3 && _c.y < 1.6) {
     const c = makeCandle(); c.position.copy(_c).addScaledVector(_n, 0.002);
     // a second candle on big surfaces
@@ -302,10 +536,13 @@ function decoratePlane(plane, matrix) {
     // make the normal point into the room (toward the viewer)
     camera.getWorldPosition(_v);
     if (_v.sub(_c).dot(_n) < 0) _n.negate();
+    const n = _n.clone(), c = _c.clone();
+    roomCenter.multiplyScalar(roomCenterCount).add(c).divideScalar(++roomCenterCount);
+    addWall(pts, c, n);
     const top = Math.max(...pts.map(p => p.y));
     const topPts = pts.filter(p => p.y > top - 0.08);
     if (topPts.length < 2) return;
-    const along = new THREE.Vector3().crossVectors(_n, new THREE.Vector3(0, 1, 0)).normalize();
+    const along = new THREE.Vector3().crossVectors(n, new THREE.Vector3(0, 1, 0)).normalize();
     topPts.sort((a, b) => a.dot(along) - b.dot(along));
     const corners = [topPts[0], topPts[topPts.length - 1]];
     const width = corners[0].distanceTo(corners[1]);
@@ -314,8 +551,8 @@ function decoratePlane(plane, matrix) {
     corners.forEach((corner, i) => {
       // corner 0 is on the viewer's right when facing the wall from inside the room
       const web = makeCobweb(size, i === 0);
-      web.position.copy(corner).addScaledVector(_n, 0.02).y -= 0.01;
-      web.quaternion.setFromRotationMatrix(new THREE.Matrix4().lookAt(_n, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0)));
+      web.position.copy(corner).addScaledVector(n, 0.05).y -= 0.01;
+      web.quaternion.setFromRotationMatrix(new THREE.Matrix4().lookAt(n, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0)));
     });
   }
 }
@@ -343,16 +580,21 @@ function pollButtons(session) {
   for (const src of session.inputSources) {
     const gp = src.gamepad; if (!gp) continue;
     const was = buttonWas.get(src) || [];
+    const right = src.handedness !== 'left';
     gp.buttons.forEach((b, idx) => {
       if (b.pressed && !was[idx]) {
-        if (idx === 5) { showScan = !showScan; occluders.traverse(o => { if (o.isMesh) o.material = showScan ? debugMat : occMat; }); }
-        if (idx === 4) clearCandles();
+        if (idx === 4 && right) clearCandles();                                    // A
+        if (idx === 5 && right) { showScan = !showScan; occluders.traverse(o => { if (o.isMesh) o.material = showScan ? debugMat : occMat; }); } // B
+        if (idx === 4 && !right) setCastleVisible(!castleOn);                      // X
+        if (idx === 5 && !right) chooseWindowWall(true);                           // Y
       }
       was[idx] = b.pressed;
     });
     buttonWas.set(src, was);
   }
 }
+const HUD_TEXT = '<b>Trigger</b> candle &nbsp;·&nbsp; <b>Grip</b> ghost &nbsp;·&nbsp; <b>A</b> clear candles &nbsp;·&nbsp; <b>B</b> show scan' +
+                 ' &nbsp;·&nbsp; <b>X</b> castle on/off &nbsp;·&nbsp; <b>Y</b> move window';
 
 // ---------- session ----------
 const sessionInit = {
@@ -360,10 +602,10 @@ const sessionInit = {
   optionalFeatures: ['plane-detection', 'mesh-detection', 'dom-overlay'],
   domOverlay: { root: hud }
 };
-let inAR = false;
+let inAR = false; let sessionTime = 0;
 renderer.xr.addEventListener('sessionstart', () => {
-  inAR = true; intro.hidden = true; hud.hidden = false; nextAutoGhost = 40;
-  hud.innerHTML = '<b>Trigger</b> place a candle &nbsp;·&nbsp; <b>Grip</b> summon the ghost &nbsp;·&nbsp; <b>A</b> clear candles &nbsp;·&nbsp; <b>B</b> show room scan';
+  inAR = true; intro.hidden = true; hud.hidden = false; nextAutoGhost = 40; sessionTime = 0;
+  hud.innerHTML = HUD_TEXT;
 });
 renderer.xr.addEventListener('sessionend', () => {
   inAR = false; intro.hidden = false; hud.hidden = true; hitTestSource = null; hitTestRequested = false; reticle.visible = false;
@@ -387,15 +629,23 @@ let preview = false;
 function buildPreview() {
   preview = true;
   scene.background = new THREE.Color(0x0b0a10);
-  const grid = new THREE.GridHelper(6, 12, 0x332a2a, 0x1f1a1a); scene.add(grid);
-  const table = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.04, 0.6), new THREE.MeshBasicMaterial({ color: 0x3a2d22 }));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(6, 6).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x1c1a1e }));
+  scene.add(floor);
+  const table = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.04, 0.6), new THREE.MeshLambertMaterial({ color: 0x3a2d22 }));
   table.position.set(0, 0.75, -1.2); scene.add(table);
   for (const x of [-0.4, 0, 0.45]) { const c = makeCandle(); c.position.set(x, 0.77, -1.2 + (x === 0 ? -0.15 : 0.1)); }
-  const web = makeCobweb(0.6, false); web.position.set(-1.5, 2.2, -2.5);
-  const web2 = makeCobweb(0.6, true); web2.position.set(1.5, 2.2, -2.5);
-  ghost.userData.from.set(1.5, 1.0, -3); ghost.userData.to.set(-1.2, 1.0, -0.8);
+  // a fake back wall and two side walls, as the headset would report them
+  const fake = (pts, n) => { const c = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(pts.length); return addWall(pts, c, n); };
+  const back = fake([new THREE.Vector3(-2.5, 0, -2.5), new THREE.Vector3(2.5, 0, -2.5), new THREE.Vector3(2.5, 2.6, -2.5), new THREE.Vector3(-2.5, 2.6, -2.5)], new THREE.Vector3(0, 0, 1));
+  fake([new THREE.Vector3(-2.5, 0, 1.5), new THREE.Vector3(-2.5, 0, -2.5), new THREE.Vector3(-2.5, 2.6, -2.5), new THREE.Vector3(-2.5, 2.6, 1.5)], new THREE.Vector3(1, 0, 0));
+  fake([new THREE.Vector3(2.5, 0, -2.5), new THREE.Vector3(2.5, 0, 1.5), new THREE.Vector3(2.5, 2.6, 1.5), new THREE.Vector3(2.5, 2.6, -2.5)], new THREE.Vector3(-1, 0, 0));
+  ceilingY = 2.6; roomCenter.set(0, 0, -0.5);
+  buildWindow(back);
+  const web = makeCobweb(0.6, false); web.position.set(-2.45, 2.55, -2.45);
+  const web2 = makeCobweb(0.6, true); web2.position.set(2.45, 2.55, -2.45);
+  ghost.userData.from.set(1.5, 1.0, -2); ghost.userData.to.set(-1.2, 1.0, -0.8);
   ghost.position.copy(ghost.userData.from); ghost.userData.state = 'drifting'; ghost.visible = true;
-  camera.position.set(0, 1.5, 1.8); camera.lookAt(0, 1.1, -1.5);
+  camera.position.set(0, 1.5, 1.8); camera.lookAt(0, 1.3, -1.5);
 }
 
 // ---------- frame loop ----------
@@ -409,8 +659,11 @@ renderer.setAnimationLoop((time, frame) => {
   if (frame) {
     const session = renderer.xr.getSession();
     const refSpace = renderer.xr.getReferenceSpace();
+    sessionTime += dt;
     updateRoomScan(frame, refSpace);
     pollButtons(session);
+    // give the headset a few seconds to report every wall, then put the window on the biggest one
+    if (!windowWall && sessionTime > 4 && walls.length) chooseWindowWall(false);
 
     if (!hitTestRequested) {
       hitTestRequested = true;
@@ -425,8 +678,8 @@ renderer.setAnimationLoop((time, frame) => {
     nextAutoGhost -= dt;
     if (nextAutoGhost <= 0 && ghost.userData.state === 'hidden') { spawnGhost(viewerPos, viewerDir); nextAutoGhost = 60 + Math.random() * 60; }
     if ((time | 0) % 1000 < 20) {
-      hud.innerHTML = '<b>Trigger</b> candle &nbsp;·&nbsp; <b>Grip</b> ghost &nbsp;·&nbsp; <b>A</b> clear candles &nbsp;·&nbsp; <b>B</b> show scan' +
-        `<br><span style="color:#8d8578">room: ${stats.meshes} mesh, ${stats.planes} planes · candles ${candles.length} · webs ${cobwebs.length}</span>`;
+      hud.innerHTML = HUD_TEXT +
+        `<br><span style="color:#8d8578">room: ${stats.meshes} mesh, ${stats.planes} planes, ${walls.length} walls · candles ${candles.length} · webs ${cobwebs.length}</span>`;
     }
   }
 
@@ -436,11 +689,14 @@ renderer.setAnimationLoop((time, frame) => {
     u.flame.scale.set(0.035 * f, 0.06 * (0.9 + 0.2 * f), 1);
     u.flame.position.x = Math.sin(t * 9 + u.seed) * 0.002;
     u.glow.material.opacity = 0.45 + 0.25 * f;
+    if (u.light) u.light.intensity = 0.9 + 0.5 * f;
   }
   updateGhost(dt, viewerPos);
+  updateBats(t, dt);
+  updateSkyParallax();
   if (preview) {
     if (ghost.userData.state === 'hidden') { ghost.userData.state = 'drifting'; ghost.userData.t = 0; ghost.visible = true; }
-    camera.position.x = Math.sin(t * 0.2) * 0.6; camera.lookAt(0, 1.1, -1.5);
+    camera.position.x = Math.sin(t * 0.2) * 0.6; camera.lookAt(0, 1.3, -1.5);
   }
   renderer.render(scene, camera);
 });
