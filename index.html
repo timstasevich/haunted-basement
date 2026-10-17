@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Haunted Room</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #07060a; color: #e8e2d6; font-family: Georgia, serif; }
+  canvas { display: block; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; padding: 10px 14px; pointer-events: none;
+         font-size: 15px; line-height: 1.4; text-shadow: 0 1px 3px #000; }
+  #hud b { color: #ffb86b; }
+  #intro { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+           justify-content: center; gap: 12px; text-align: center; padding: 24px; }
+  #intro h1 { margin: 0; font-weight: normal; font-size: 30px; letter-spacing: 2px; color: #d9c9a8; }
+  #intro p { margin: 0; max-width: 420px; color: #a89f90; }
+  #ARButton { position: fixed !important; bottom: 32px !important; left: 50% !important;
+              transform: translateX(-50%); font-family: Georgia, serif !important; font-size: 18px !important;
+              padding: 14px 28px !important; border-radius: 999px !important; opacity: 1 !important;
+              background: #3a1f1f !important; border: 1px solid #a65d3a !important; color: #ffd9a8 !important; }
+</style>
+</head>
+<body>
+<div id="intro">
+  <h1>HAUNTED ROOM</h1>
+  <p>Open this page in the Meta Quest browser, press <b>Enter AR</b>, and allow it to use your room setup.</p>
+  <p id="support"></p>
+</div>
+<div id="hud" hidden></div>
+
+<script type="importmap">
+{ "imports": { "three": "./lib/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { ARButton } from './lib/ARButton.js';
+
+// ---------- renderer / scene ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 40);
+camera.position.set(0, 1.5, 0);
+
+const hud = document.getElementById('hud');
+const intro = document.getElementById('intro');
+const support = document.getElementById('support');
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------- textures drawn in code (no image files needed) ----------
+function makeCanvas(size) {
+  const c = document.createElement('canvas'); c.width = c.height = size; return c;
+}
+function glowTexture(inner, outer) {
+  const c = makeCanvas(128); const g = c.getContext('2d');
+  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grd.addColorStop(0, inner); grd.addColorStop(0.35, outer); grd.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function flameTexture() {
+  const c = makeCanvas(128); const g = c.getContext('2d');
+  g.translate(64, 64);
+  const grd = g.createRadialGradient(0, 10, 2, 0, 0, 60);
+  grd.addColorStop(0, 'rgba(255,250,220,1)'); grd.addColorStop(0.25, 'rgba(255,190,80,0.95)');
+  grd.addColorStop(0.6, 'rgba(255,90,20,0.5)'); grd.addColorStop(1, 'rgba(255,40,0,0)');
+  g.fillStyle = grd; g.scale(0.55, 1); g.beginPath(); g.arc(0, 0, 60, 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function cobwebTexture() {
+  // a corner web anchored at the top-left of the square
+  const S = 512; const c = makeCanvas(S); const g = c.getContext('2d');
+  g.strokeStyle = 'rgba(235,235,245,0.85)'; g.lineWidth = 1.6; g.lineCap = 'round';
+  const spokes = 11;
+  for (let i = 0; i <= spokes; i++) {
+    const a = (Math.PI / 2) * (i / spokes);
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(a) * S * 0.98, Math.sin(a) * S * 0.98); g.stroke();
+  }
+  g.lineWidth = 1.1;
+  for (let r = 40; r < S * 0.95; r += 34 + r * 0.06) {
+    g.beginPath();
+    for (let i = 0; i <= spokes; i++) {
+      const a = (Math.PI / 2) * (i / spokes);
+      const sag = r * 0.06;
+      const am = (Math.PI / 2) * ((i - 0.5) / spokes);
+      if (i === 0) g.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      else g.quadraticCurveTo(Math.cos(am) * (r - sag), Math.sin(am) * (r - sag), Math.cos(a) * r, Math.sin(a) * r);
+    }
+    g.stroke();
+  }
+  // a few loose strands
+  g.strokeStyle = 'rgba(235,235,245,0.5)';
+  for (let i = 0; i < 5; i++) {
+    const a = (Math.PI / 2) * Math.random();
+    g.beginPath(); g.moveTo(Math.cos(a) * S * 0.6, Math.sin(a) * S * 0.6);
+    g.bezierCurveTo(Math.cos(a) * S * 0.75 + 30, Math.sin(a) * S * 0.75 + 40,
+                    Math.cos(a) * S * 0.8 - 20, Math.sin(a) * S * 0.9 + 60,
+                    Math.cos(a) * S * 0.85, Math.sin(a) * S * 1.05);
+    g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const TEX = { flame: flameTexture(), glow: glowTexture('rgba(255,170,60,0.9)', 'rgba(255,110,30,0.35)'),
+              ghostGlow: glowTexture('rgba(170,230,255,0.6)', 'rgba(120,180,255,0.2)'), web: cobwebTexture() };
+
+// ---------- props ----------
+const props = new THREE.Group(); scene.add(props);
+const candles = []; const cobwebs = [];
+
+function makeCandle() {
+  const g = new THREE.Group();
+  const h = 0.09 + Math.random() * 0.08;
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.021, h, 18),
+                              new THREE.MeshBasicMaterial({ color: 0xf1e3c2 }));
+  body.position.y = h / 2; g.add(body);
+  const drip = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.016, 0.01, 18),
+                              new THREE.MeshBasicMaterial({ color: 0xe8d6b0 }));
+  drip.position.y = h - 0.004; g.add(drip);
+  const wick = new THREE.Mesh(new THREE.CylinderGeometry(0.0015, 0.0015, 0.012, 6),
+                              new THREE.MeshBasicMaterial({ color: 0x222222 }));
+  wick.position.y = h + 0.005; g.add(wick);
+  const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.flame, transparent: true,
+                blending: THREE.AdditiveBlending, depthWrite: false }));
+  flame.position.y = h + 0.028; flame.scale.set(0.035, 0.06, 1); g.add(flame);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.glow, transparent: true,
+               blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.6 }));
+  glow.position.y = h + 0.03; glow.scale.set(0.22, 0.22, 1); g.add(glow);
+  g.userData = { flame, glow, h, seed: Math.random() * 100 };
+  candles.push(g); props.add(g);
+  return g;
+}
+
+function makeCobweb(size, mirrored) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size),
+            new THREE.MeshBasicMaterial({ map: TEX.web, transparent: true, side: THREE.DoubleSide,
+                                          depthWrite: false, opacity: 0.9 }));
+  // the texture's web corner is at the top-left of the plane; shift so that corner sits at the origin
+  m.geometry.translate(mirrored ? -size / 2 : size / 2, -size / 2, 0);
+  if (mirrored) m.scale.x = -1;
+  cobwebs.push(m); props.add(m);
+  return m;
+}
+
+// ---------- ghost ----------
+const ghost = new THREE.Group(); ghost.visible = false; props.add(ghost);
+{
+  const mat = new THREE.MeshBasicMaterial({ color: 0xcfeeff, transparent: true, opacity: 0.55, depthWrite: false });
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 24, 18), mat); head.position.y = 0.55; ghost.add(head);
+  const pts = [];
+  for (let i = 0; i <= 12; i++) { const t = i / 12; pts.push(new THREE.Vector2(0.05 + 0.17 * Math.sin(t * Math.PI * 0.9), 0.55 - t * 0.7)); }
+  const body = new THREE.Mesh(new THREE.LatheGeometry(pts, 28), mat); ghost.add(body);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x101018, transparent: true, opacity: 0.9 });
+  for (const s of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), eyeMat);
+    e.position.set(s * 0.06, 0.58, 0.13); ghost.add(e); }
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.ghostGlow, transparent: true,
+               blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.8 }));
+  glow.position.y = 0.3; glow.scale.set(1.1, 1.4, 1); ghost.add(glow);
+  ghost.userData = { mat, eyeMat, glow, state: 'hidden', t: 0, from: new THREE.Vector3(), to: new THREE.Vector3() };
+}
+let nextAutoGhost = 40; // seconds until the ghost shows up on its own
+
+function spawnGhost(viewerPos, viewerDir) {
+  const u = ghost.userData;
+  // appear 2.5 to 4 m away, mostly behind or beside the viewer
+  const ang = Math.atan2(viewerDir.x, viewerDir.z) + Math.PI + (Math.random() - 0.5) * 2.2;
+  const d = 2.5 + Math.random() * 1.5;
+  u.from.set(viewerPos.x + Math.sin(ang) * d, 0.9 + Math.random() * 0.4, viewerPos.z + Math.cos(ang) * d);
+  u.to.set(viewerPos.x + Math.sin(ang) * 0.7, 1.0, viewerPos.z + Math.cos(ang) * 0.7);
+  ghost.position.copy(u.from);
+  u.state = 'drifting'; u.t = 0; ghost.visible = true;
+  playWail();
+}
+
+function updateGhost(dt, viewerPos) {
+  const u = ghost.userData;
+  if (u.state === 'hidden') return;
+  u.t += dt;
+  const dur = 9;
+  const k = Math.min(u.t / dur, 1);
+  const ease = k * k * (3 - 2 * k);
+  ghost.position.lerpVectors(u.from, u.to, ease);
+  ghost.position.y += Math.sin(u.t * 1.7) * 0.06;
+  ghost.lookAt(viewerPos.x, ghost.position.y, viewerPos.z);
+  ghost.rotation.z = Math.sin(u.t * 0.9) * 0.08;
+  let a = 1;
+  if (k < 0.15) a = k / 0.15;
+  if (k > 0.8) a = (1 - k) / 0.2;
+  u.mat.opacity = 0.55 * a; u.eyeMat.opacity = 0.9 * a; u.glow.material.opacity = 0.8 * a;
+  if (k >= 1) { u.state = 'hidden'; ghost.visible = false; }
+}
+
+// ---------- sound (generated, no files) ----------
+let audio;
+function playWail() {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const t0 = audio.currentTime;
+    const o = audio.createOscillator(); const g = audio.createGain();
+    const f = audio.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(160, t0); o.frequency.exponentialRampToValueAtTime(420, t0 + 2.5);
+    o.frequency.exponentialRampToValueAtTime(120, t0 + 6);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.12, t0 + 1.2);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 6.5);
+    o.connect(f); f.connect(g); g.connect(audio.destination); o.start(t0); o.stop(t0 + 6.6);
+  } catch (e) { /* audio is optional */ }
+}
+
+// ---------- room scan: occluders built from the Quest's Space Setup ----------
+const occluders = new THREE.Group(); scene.add(occluders);
+const occMat = new THREE.MeshBasicMaterial({ colorWrite: false });      // writes depth only: hides props behind real things
+const debugMat = new THREE.MeshBasicMaterial({ color: 0x66ffcc, wireframe: true, transparent: true, opacity: 0.5 });
+let showScan = false;
+const meshMap = new Map();   // XRMesh -> {mesh, time}
+const planeMap = new Map();  // XRPlane -> {mesh, time, decorated}
+const stats = { meshes: 0, planes: 0 };
+const _m = new THREE.Matrix4();
+
+function updateRoomScan(frame, refSpace) {
+  const seen = new Set();
+  if (frame.detectedMeshes) {
+    for (const xrMesh of frame.detectedMeshes) {
+      seen.add(xrMesh);
+      let rec = meshMap.get(xrMesh);
+      if (!rec || rec.time < xrMesh.lastChangedTime) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(xrMesh.vertices, 3));
+        geo.setIndex(new THREE.BufferAttribute(xrMesh.indices, 1));
+        if (rec) { rec.mesh.geometry.dispose(); rec.mesh.geometry = geo; }
+        else { rec = { mesh: new THREE.Mesh(geo, occMat), time: 0 }; rec.mesh.renderOrder = -10; occluders.add(rec.mesh); meshMap.set(xrMesh, rec); }
+        rec.time = xrMesh.lastChangedTime;
+      }
+      const pose = frame.getPose(xrMesh.meshSpace, refSpace);
+      if (pose) { _m.fromArray(pose.transform.matrix); rec.mesh.matrix.copy(_m); rec.mesh.matrixAutoUpdate = false; rec.mesh.matrixWorldNeedsUpdate = true; }
+    }
+  }
+  for (const [k, rec] of meshMap) if (!seen.has(k)) { occluders.remove(rec.mesh); rec.mesh.geometry.dispose(); meshMap.delete(k); }
+  stats.meshes = meshMap.size;
+
+  const seenP = new Set();
+  if (frame.detectedPlanes) {
+    for (const plane of frame.detectedPlanes) {
+      seenP.add(plane);
+      let rec = planeMap.get(plane);
+      const pose = frame.getPose(plane.planeSpace, refSpace);
+      if (!pose) continue;
+      if (!rec || rec.time < plane.lastChangedTime) {
+        const shape = new THREE.Shape(plane.polygon.map(p => new THREE.Vector2(p.x, p.z)));
+        const geo = new THREE.ShapeGeometry(shape);
+        geo.rotateX(Math.PI / 2); // shape lies in XY; plane polygons lie in XZ
+        if (rec) { rec.mesh.geometry.dispose(); rec.mesh.geometry = geo; }
+        else {
+          rec = { mesh: new THREE.Mesh(geo, occMat), time: 0, decorated: false };
+          rec.mesh.renderOrder = -10; rec.mesh.matrixAutoUpdate = false; occluders.add(rec.mesh); planeMap.set(plane, rec);
+        }
+        rec.time = plane.lastChangedTime;
+      }
+      _m.fromArray(pose.transform.matrix); rec.mesh.matrix.copy(_m); rec.mesh.matrixWorldNeedsUpdate = true;
+      // planes are only needed as occluders when the headset gives no full mesh
+      rec.mesh.visible = meshMap.size === 0 || showScan;
+      if (!rec.decorated) { rec.decorated = true; decoratePlane(plane, _m); }
+    }
+  }
+  for (const [k, rec] of planeMap) if (!seenP.has(k)) { occluders.remove(rec.mesh); rec.mesh.geometry.dispose(); planeMap.delete(k); }
+  stats.planes = planeMap.size;
+}
+
+// put props on the room automatically: candles on tables and desks, cobwebs in the top corners of walls
+const FURNITURE = new Set(['table', 'desk', 'nightstand', 'shelf', 'dresser', 'counter', 'cabinet', 'other']);
+const _v = new THREE.Vector3(), _n = new THREE.Vector3(), _c = new THREE.Vector3();
+function decoratePlane(plane, matrix) {
+  const label = (plane.semanticLabel || '').toLowerCase();
+  const pts = plane.polygon.map(p => new THREE.Vector3(p.x, 0, p.z).applyMatrix4(matrix));
+  if (pts.length < 3) return;
+  _n.set(0, 1, 0).transformDirection(matrix);        // plane normal in world space
+  _c.set(0, 0, 0); for (const p of pts) _c.add(p); _c.divideScalar(pts.length);
+
+  if (plane.orientation === 'horizontal' && FURNITURE.has(label) && _c.y > 0.3 && _c.y < 1.6) {
+    const c = makeCandle(); c.position.copy(_c).addScaledVector(_n, 0.002);
+    // a second candle on big surfaces
+    if (pts.length >= 4 && pts[0].distanceTo(pts[2]) > 1.0) {
+      const c2 = makeCandle(); c2.position.lerpVectors(_c, pts[0], 0.6).y = _c.y + 0.002;
+    }
+  }
+  if (plane.orientation === 'vertical' && (label === 'wall' || label === 'wall_face' || label === '')) {
+    // make the normal point into the room (toward the viewer)
+    camera.getWorldPosition(_v);
+    if (_v.sub(_c).dot(_n) < 0) _n.negate();
+    const top = Math.max(...pts.map(p => p.y));
+    const topPts = pts.filter(p => p.y > top - 0.08);
+    if (topPts.length < 2) return;
+    const along = new THREE.Vector3().crossVectors(_n, new THREE.Vector3(0, 1, 0)).normalize();
+    topPts.sort((a, b) => a.dot(along) - b.dot(along));
+    const corners = [topPts[0], topPts[topPts.length - 1]];
+    const width = corners[0].distanceTo(corners[1]);
+    if (width < 0.8) return;
+    const size = Math.min(0.55, width * 0.3);
+    corners.forEach((corner, i) => {
+      // corner 0 is on the viewer's right when facing the wall from inside the room
+      const web = makeCobweb(size, i === 0);
+      web.position.copy(corner).addScaledVector(_n, 0.02).y -= 0.01;
+      web.quaternion.setFromRotationMatrix(new THREE.Matrix4().lookAt(_n, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0)));
+    });
+  }
+}
+
+// ---------- hit test reticle (place candles with the trigger) ----------
+const reticle = new THREE.Mesh(new THREE.RingGeometry(0.04, 0.05, 32).rotateX(-Math.PI / 2),
+                               new THREE.MeshBasicMaterial({ color: 0xffb86b, transparent: true, opacity: 0.8 }));
+reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
+let hitTestSource = null; let hitTestRequested = false;
+
+// ---------- controllers ----------
+const viewerPos = new THREE.Vector3(), viewerDir = new THREE.Vector3();
+for (let i = 0; i < 2; i++) {
+  const ctrl = renderer.xr.getController(i);
+  ctrl.addEventListener('select', () => {
+    if (reticle.visible) { const c = makeCandle(); c.position.setFromMatrixPosition(reticle.matrix); }
+  });
+  ctrl.addEventListener('squeeze', () => {
+    if (ghost.userData.state === 'hidden') spawnGhost(viewerPos, viewerDir);
+  });
+  scene.add(ctrl);
+}
+const buttonWas = new WeakMap();
+function pollButtons(session) {
+  for (const src of session.inputSources) {
+    const gp = src.gamepad; if (!gp) continue;
+    const was = buttonWas.get(src) || [];
+    gp.buttons.forEach((b, idx) => {
+      if (b.pressed && !was[idx]) {
+        if (idx === 5) { showScan = !showScan; occluders.traverse(o => { if (o.isMesh) o.material = showScan ? debugMat : occMat; }); }
+      }
+      was[idx] = b.pressed;
+    });
+    buttonWas.set(src, was);
+  }
+}
+
+// ---------- session ----------
+const sessionInit = {
+  requiredFeatures: ['local-floor', 'hit-test'],
+  optionalFeatures: ['plane-detection', 'mesh-detection', 'dom-overlay'],
+  domOverlay: { root: hud }
+};
+let inAR = false;
+renderer.xr.addEventListener('sessionstart', () => {
+  inAR = true; intro.hidden = true; hud.hidden = false; nextAutoGhost = 40;
+  hud.innerHTML = '<b>Trigger</b> place a candle &nbsp;·&nbsp; <b>Grip</b> summon the ghost &nbsp;·&nbsp; <b>B</b> show room scan';
+});
+renderer.xr.addEventListener('sessionend', () => {
+  inAR = false; intro.hidden = false; hud.hidden = true; hitTestSource = null; hitTestRequested = false; reticle.visible = false;
+});
+
+async function setup() {
+  const ok = navigator.xr && await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
+  if (ok) {
+    support.textContent = '';
+    document.body.appendChild(ARButton.createButton(renderer, sessionInit));
+  } else {
+    support.textContent = 'This browser can\'t do passthrough AR. Here is a preview of the props instead.';
+    intro.style.justifyContent = 'flex-start'; intro.style.paddingTop = '40px';
+    buildPreview();
+  }
+}
+setup();
+
+// ---------- desktop preview (no headset) ----------
+let preview = false;
+function buildPreview() {
+  preview = true;
+  scene.background = new THREE.Color(0x0b0a10);
+  const grid = new THREE.GridHelper(6, 12, 0x332a2a, 0x1f1a1a); scene.add(grid);
+  const table = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.04, 0.6), new THREE.MeshBasicMaterial({ color: 0x3a2d22 }));
+  table.position.set(0, 0.75, -1.2); scene.add(table);
+  for (const x of [-0.4, 0, 0.45]) { const c = makeCandle(); c.position.set(x, 0.77, -1.2 + (x === 0 ? -0.15 : 0.1)); }
+  const web = makeCobweb(0.6, false); web.position.set(-1.5, 2.2, -2.5);
+  const web2 = makeCobweb(0.6, true); web2.position.set(1.5, 2.2, -2.5);
+  ghost.userData.from.set(1.5, 1.0, -3); ghost.userData.to.set(-1.2, 1.0, -0.8);
+  ghost.position.copy(ghost.userData.from); ghost.userData.state = 'drifting'; ghost.visible = true;
+  camera.position.set(0, 1.5, 1.8); camera.lookAt(0, 1.1, -1.5);
+}
+
+// ---------- frame loop ----------
+const clock = new THREE.Clock();
+renderer.setAnimationLoop((time, frame) => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  const t = time / 1000;
+
+  camera.getWorldPosition(viewerPos); camera.getWorldDirection(viewerDir);
+
+  if (frame) {
+    const session = renderer.xr.getSession();
+    const refSpace = renderer.xr.getReferenceSpace();
+    updateRoomScan(frame, refSpace);
+    pollButtons(session);
+
+    if (!hitTestRequested) {
+      hitTestRequested = true;
+      session.requestReferenceSpace('viewer').then(vs => session.requestHitTestSource({ space: vs }))
+        .then(src => { hitTestSource = src; }).catch(() => {});
+    }
+    if (hitTestSource) {
+      const hits = frame.getHitTestResults(hitTestSource);
+      if (hits.length) { reticle.visible = true; reticle.matrix.fromArray(hits[0].getPose(refSpace).transform.matrix); }
+      else reticle.visible = false;
+    }
+    nextAutoGhost -= dt;
+    if (nextAutoGhost <= 0 && ghost.userData.state === 'hidden') { spawnGhost(viewerPos, viewerDir); nextAutoGhost = 60 + Math.random() * 60; }
+    if ((time | 0) % 1000 < 20) {
+      hud.innerHTML = '<b>Trigger</b> candle &nbsp;·&nbsp; <b>Grip</b> ghost &nbsp;·&nbsp; <b>B</b> show scan' +
+        `<br><span style="color:#8d8578">room: ${stats.meshes} mesh, ${stats.planes} planes · candles ${candles.length} · webs ${cobwebs.length}</span>`;
+    }
+  }
+
+  for (const c of candles) {
+    const u = c.userData;
+    const f = 0.85 + 0.15 * Math.sin(t * 13 + u.seed) * Math.sin(t * 7.3 + u.seed * 2) + 0.08 * Math.sin(t * 31 + u.seed);
+    u.flame.scale.set(0.035 * f, 0.06 * (0.9 + 0.2 * f), 1);
+    u.flame.position.x = Math.sin(t * 9 + u.seed) * 0.002;
+    u.glow.material.opacity = 0.45 + 0.25 * f;
+  }
+  updateGhost(dt, viewerPos);
+  if (preview) {
+    if (ghost.userData.state === 'hidden') { ghost.userData.state = 'drifting'; ghost.userData.t = 0; ghost.visible = true; }
+    camera.position.x = Math.sin(t * 0.2) * 0.6; camera.lookAt(0, 1.1, -1.5);
+  }
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
