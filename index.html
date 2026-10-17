@@ -415,8 +415,9 @@ const ghost = new THREE.Group(); ghost.visible = false; props.add(ghost);
   const tongue = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 10), new THREE.MeshLambertMaterial({ color: 0xd8304a, emissive: 0x501020 }));
   tongue.scale.set(1.1, 0.6, 0.8); tongue.position.set(0, -0.11, 0.235); ghost.add(tongue);
   for (const s of [-1, 1]) {
-    const fang = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.06, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    fang.rotation.x = Math.PI; fang.position.set(s * 0.075, -0.045, 0.245); ghost.add(fang);
+    // fangs hang from the upper lip, inside the mouth
+    const fang = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.055, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    fang.rotation.x = Math.PI; fang.position.set(s * 0.06, -0.05, 0.263); ghost.add(fang);
   }
   // stubby arms, pivoted at the shoulder so they can cover the face
   const arms = [];
