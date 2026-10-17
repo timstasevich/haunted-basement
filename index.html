@@ -390,56 +390,125 @@ function updateBats(t, dt) {
   }
 }
 
-// ---------- ghost ----------
+// ---------- ghost: a Boo. Round, fanged, and it only creeps up when you aren't looking ----------
 const ghost = new THREE.Group(); ghost.visible = false; props.add(ghost);
 {
-  const mat = new THREE.MeshBasicMaterial({ color: 0xcfeeff, transparent: true, opacity: 0.55, depthWrite: false });
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 24, 18), mat); head.position.y = 0.55; ghost.add(head);
-  const pts = [];
-  for (let i = 0; i <= 12; i++) { const t = i / 12; pts.push(new THREE.Vector2(0.05 + 0.17 * Math.sin(t * Math.PI * 0.9), 0.55 - t * 0.7)); }
-  const body = new THREE.Mesh(new THREE.LatheGeometry(pts, 28), mat); ghost.add(body);
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x101018, transparent: true, opacity: 0.9 });
-  for (const s of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), eyeMat);
-    e.position.set(s * 0.06, 0.58, 0.13); ghost.add(e); }
+  const white = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xc8c8d4 });
+  const black = new THREE.MeshBasicMaterial({ color: 0x0a0a10 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.26, 32, 24), white); ghost.add(body);
+  // tapered tail at the back
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.3, 16), white);
+  tail.rotation.x = Math.PI / 2 + 0.5; tail.position.set(0, -0.06, -0.3); ghost.add(tail);
+  // eyes: tall black ovals with a highlight, under angry brows
+  const eyes = new THREE.Group(); ghost.add(eyes);
+  for (const s of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 16, 12), black);
+    eye.scale.set(1, 1.7, 0.5); eye.position.set(s * 0.095, 0.07, 0.235); eyes.add(eye);
+    const hi = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    hi.position.set(s * 0.08, 0.1, 0.262); eyes.add(hi);
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.025, 0.02), black);
+    brow.position.set(s * 0.1, 0.15, 0.225); brow.rotation.z = s * 0.55; brow.rotation.x = -0.4; eyes.add(brow);
+  }
+  // wide open mouth with a tongue and two fangs
+  const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.1, 20, 14), new THREE.MeshBasicMaterial({ color: 0x3a0812 }));
+  mouth.scale.set(1.4, 0.75, 0.5); mouth.position.set(0, -0.08, 0.215); ghost.add(mouth);
+  const tongue = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 10), new THREE.MeshLambertMaterial({ color: 0xd8304a, emissive: 0x501020 }));
+  tongue.scale.set(1.1, 0.6, 0.8); tongue.position.set(0, -0.11, 0.235); ghost.add(tongue);
+  for (const s of [-1, 1]) {
+    const fang = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.06, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    fang.rotation.x = Math.PI; fang.position.set(s * 0.075, -0.045, 0.245); ghost.add(fang);
+  }
+  // stubby arms, pivoted at the shoulder so they can cover the face
+  const arms = [];
+  for (const s of [-1, 1]) {
+    const pivot = new THREE.Group(); pivot.position.set(s * 0.22, -0.02, 0.1); ghost.add(pivot);
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.1, 4, 10), white);
+    arm.rotation.z = s * -1.1; arm.rotation.x = -0.6; arm.position.set(s * 0.07, -0.03, 0.05); pivot.add(arm);
+    arms.push(pivot);
+  }
+  // pink cheeks that show when it gets shy
+  const blushMat = new THREE.MeshBasicMaterial({ color: 0xff9fb0, transparent: true, opacity: 0 });
+  for (const s of [-1, 1]) {
+    const blush = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), blushMat);
+    blush.scale.set(1.3, 0.7, 0.3); blush.position.set(s * 0.17, -0.02, 0.2); ghost.add(blush);
+  }
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.ghostGlow, transparent: true,
-               blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.8 }));
-  glow.position.y = 0.3; glow.scale.set(1.1, 1.4, 1); ghost.add(glow);
-  ghost.userData = { mat, eyeMat, glow, state: 'hidden', t: 0, from: new THREE.Vector3(), to: new THREE.Vector3() };
+               blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.5 }));
+  glow.scale.set(1.2, 1.2, 1); ghost.add(glow);
+  ghost.userData = { arms, blushMat, glow, state: 'hidden', t: 0, shy: 0, look: 0, giggled: false, from: new THREE.Vector3() };
 }
 let nextAutoGhost = 40; // seconds until the ghost shows up on its own
 
 function spawnGhost(viewerPos, viewerDir) {
   const u = ghost.userData;
-  // appear 2.5 to 4 m away, mostly behind or beside the viewer
-  const ang = Math.atan2(viewerDir.x, viewerDir.z) + Math.PI + (Math.random() - 0.5) * 2.2;
+  // appear 2.5 to 4 m away, behind or beside the viewer
+  const ang = Math.atan2(viewerDir.x, viewerDir.z) + Math.PI + (Math.random() - 0.5) * 2.0;
   const d = 2.5 + Math.random() * 1.5;
-  u.from.set(viewerPos.x + Math.sin(ang) * d, 0.9 + Math.random() * 0.4, viewerPos.z + Math.cos(ang) * d);
-  u.to.set(viewerPos.x + Math.sin(ang) * 0.7, 1.0, viewerPos.z + Math.cos(ang) * 0.7);
+  u.from.set(viewerPos.x + Math.sin(ang) * d, 1.2 + Math.random() * 0.3, viewerPos.z + Math.cos(ang) * d);
   ghost.position.copy(u.from);
-  u.state = 'drifting'; u.t = 0; ghost.visible = true;
+  u.state = 'hunting'; u.t = 0; u.shy = 0; u.giggled = false; ghost.visible = true;
+  ghost.scale.setScalar(0.01);
   playWail();
 }
 
+const _gd = new THREE.Vector3();
 function updateGhost(dt, viewerPos) {
   const u = ghost.userData;
   if (u.state === 'hidden') return;
   u.t += dt;
-  const dur = 9;
-  const k = Math.min(u.t / dur, 1);
-  const ease = k * k * (3 - 2 * k);
-  ghost.position.lerpVectors(u.from, u.to, ease);
-  ghost.position.y += Math.sin(u.t * 1.7) * 0.06;
+  _gd.copy(viewerPos).sub(ghost.position); _gd.y = 0;
+  const dist = _gd.length(); _gd.normalize();
+  // is the viewer looking at it? (within about 35 degrees of straight at it)
+  const toGhost = ghost.position.clone().sub(viewerPos).normalize();
+  const looking = !preview && viewerDir.dot(toGhost) > 0.82 && u.t > 1.0;
+  u.shy += ((looking ? 1 : 0) - u.shy) * Math.min(1, dt * 6);
+  if (u.state === 'hunting') {
+    if (!looking && !(preview && dist < 1.4)) {
+      const speed = 0.35 + Math.min(0.6, u.t * 0.04);
+      ghost.position.addScaledVector(_gd, speed * dt);
+      ghost.position.y += Math.sin(u.t * 2.2) * 0.004;
+      u.giggled = false;
+    } else if (!u.giggled) { u.giggled = true; playGiggle(); }
+    if (dist < 0.75 && !preview) { u.state = 'boo'; u.t = 0; playBoo(); }
+    if (u.t > 60) { u.state = 'leaving'; u.t = 0; }
+  } else if (u.state === 'boo') {
+    // lunge at the face, then vanish
+    if (u.t > 0.6) { u.state = 'leaving'; u.t = 0; }
+  } else if (u.state === 'leaving') {
+    if (u.t > 0.5) { u.state = 'hidden'; ghost.visible = false; return; }
+  }
+  // scale in on arrival, out on leaving
+  const grow = Math.min(1, u.t * 2);
+  const s = u.state === 'leaving' ? 1 - u.t * 2 : (u.state === 'boo' ? 1 + u.t * 0.6 : grow);
+  ghost.scale.setScalar(Math.max(0.01, s));
+  // face the viewer; when shy, turn away a little and cover the eyes
   ghost.lookAt(viewerPos.x, ghost.position.y, viewerPos.z);
-  ghost.rotation.z = Math.sin(u.t * 0.9) * 0.08;
-  let a = 1;
-  if (k < 0.15) a = k / 0.15;
-  if (k > 0.8) a = (1 - k) / 0.2;
-  u.mat.opacity = 0.55 * a; u.eyeMat.opacity = 0.9 * a; u.glow.material.opacity = 0.8 * a;
-  if (k >= 1) { u.state = 'hidden'; ghost.visible = false; }
+  ghost.rotateY(u.shy * 0.5);
+  ghost.rotation.z = Math.sin(u.t * 1.5) * 0.06;
+  ghost.position.y += Math.sin(u.t * 3) * 0.0015;
+  for (let i = 0; i < 2; i++) {
+    const sgn = i === 0 ? -1 : 1;
+    u.arms[i].rotation.z = sgn * (0.2 + u.shy * -1.9);
+    u.arms[i].rotation.x = -0.3 - u.shy * 0.9;
+    u.arms[i].position.y = -0.02 + u.shy * 0.1;
+  }
+  u.blushMat.opacity = u.shy * 0.9;
+  u.glow.material.opacity = 0.35 + 0.25 * (1 - u.shy);
 }
 
 // ---------- sound (generated, no files) ----------
 let audio;
+function ctx() { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); return audio; }
+function blip(freqA, freqB, dur, gain, type, when) {
+  const a = ctx(); const t0 = a.currentTime + (when || 0);
+  const o = a.createOscillator(); const g = a.createGain(); o.type = type || 'triangle';
+  o.frequency.setValueAtTime(freqA, t0); o.frequency.exponentialRampToValueAtTime(freqB, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function playGiggle() { try { blip(520, 700, 0.12, 0.08, 'square', 0); blip(620, 820, 0.12, 0.08, 'square', 0.14); blip(560, 740, 0.16, 0.07, 'square', 0.28); } catch (e) {} }
+function playBoo() { try { blip(220, 70, 0.7, 0.25, 'sawtooth', 0); blip(330, 90, 0.7, 0.15, 'square', 0.02); } catch (e) {} }
 function playWail() {
   try {
     audio = audio || new (window.AudioContext || window.webkitAudioContext)();
@@ -643,8 +712,7 @@ function buildPreview() {
   buildWindow(back);
   const web = makeCobweb(0.6, false); web.position.set(-2.45, 2.55, -2.45);
   const web2 = makeCobweb(0.6, true); web2.position.set(2.45, 2.55, -2.45);
-  ghost.userData.from.set(1.5, 1.0, -2); ghost.userData.to.set(-1.2, 1.0, -0.8);
-  ghost.position.copy(ghost.userData.from); ghost.userData.state = 'drifting'; ghost.visible = true;
+  ghost.position.set(1.2, 1.3, -1.6); ghost.userData.state = 'hunting'; ghost.visible = true;
   camera.position.set(0, 1.5, 1.8); camera.lookAt(0, 1.3, -1.5);
 }
 
@@ -695,7 +763,8 @@ renderer.setAnimationLoop((time, frame) => {
   updateBats(t, dt);
   updateSkyParallax();
   if (preview) {
-    if (ghost.userData.state === 'hidden') { ghost.userData.state = 'drifting'; ghost.userData.t = 0; ghost.visible = true; }
+    if (ghost.userData.state === 'hidden') { ghost.position.set(1.2, 1.3, -1.6); ghost.userData.state = 'hunting'; ghost.userData.t = 0; ghost.visible = true; }
+    ghost.userData.shy = 0.5 + 0.5 * Math.sin(t * 0.8);   // show both faces in the preview
     camera.position.x = Math.sin(t * 0.2) * 0.6; camera.lookAt(0, 1.3, -1.5);
   }
   renderer.render(scene, camera);
